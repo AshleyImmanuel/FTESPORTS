@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import nodemailer from 'nodemailer';
 
-// Force Node.js runtime (not Edge) for Nodemailer/Prisma
+// Make sure this runs on Node.js (not Edge) on Vercel
 export const runtime = 'nodejs';
-// Make sure Next doesn't try to pre-render this like a page
+// Tell Next it’s always dynamic, so it doesn’t try to pre-generate anything
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
@@ -13,7 +13,7 @@ export async function POST(request) {
     const body = await request.json();
     const { name, email, mobile, message } = body;
 
-    // Basic validation
+    // Required fields
     if (!name || !email || !mobile || !message) {
       return NextResponse.json(
         { success: false, error: 'All fields are required' },
@@ -21,6 +21,7 @@ export async function POST(request) {
       );
     }
 
+    // Email validation
     const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
     if (!emailRegex.test(email)) {
       return NextResponse.json(
@@ -29,6 +30,7 @@ export async function POST(request) {
       );
     }
 
+    // Mobile validation
     const mobileRegex = /^[0-9]{10,15}$/;
     if (!mobileRegex.test(mobile)) {
       return NextResponse.json(
@@ -37,7 +39,7 @@ export async function POST(request) {
       );
     }
 
-    // Save to Postgres via Prisma
+    // 1) Save to Postgres via Prisma
     const contact = await prisma.contact.create({
       data: {
         name,
@@ -47,18 +49,18 @@ export async function POST(request) {
       },
     });
 
-    // Only try email if env vars exist
-    const user = process.env.EMAIL_USER;
-    const pass = process.env.EMAIL_PASS;
-    const to = process.env.EMAIL_TO || process.env.EMAIL_USER;
+    // 2) Try to send email (but never crash if it fails)
+    const EMAIL_USER = process.env.EMAIL_USER;
+    const EMAIL_PASS = process.env.EMAIL_PASS;
+    const EMAIL_TO = process.env.EMAIL_TO || EMAIL_USER;
 
-    if (user && pass) {
+    if (EMAIL_USER && EMAIL_PASS) {
       try {
         const transporter = nodemailer.createTransport({
           service: 'gmail',
           auth: {
-            user,
-            pass,
+            user: EMAIL_USER,
+            pass: EMAIL_PASS,
           },
         });
 
@@ -177,13 +179,13 @@ export async function POST(request) {
         `;
 
         await transporter.sendMail({
-          from: `"FTZ Comms Array" <${user}>`,
-          to,
+          from: `"FTZ Comms Array" <${EMAIL_USER}>`,
+          to: EMAIL_TO,
           subject: `New Contact from ${name} | FTZ Comms Array`,
           html: emailHTML,
         });
       } catch (emailError) {
-        // Log but do NOT crash build / request
+        // important: NEVER crash build or API if email fails
         console.error('Email sending failed:', emailError);
       }
     }
@@ -198,6 +200,7 @@ export async function POST(request) {
     );
   } catch (error) {
     console.error('Contact API Error:', error);
+
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
